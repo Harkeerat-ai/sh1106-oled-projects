@@ -1,53 +1,68 @@
-# 🖥️ SH1106 OLED Projects
+# 📡 STM32 ESP OLED Terminal
 
-A collection of STM32 projects driving an **SH1106 128×64 OLED** over I2C. Each project is self-contained and shares the same base hardware setup.
+An STM32 project that bridges an **ESP Wi-Fi module** and an **SH1106 OLED display**, handling a structured serial handshake to configure the ESP, then switching into a live terminal display mode once the system is ready.
 
 ---
 
 ## 📋 Table of Contents
 
-- [Projects](#projects)
-- [Shared Hardware](#shared-hardware)
-- [Shared Wiring](#shared-wiring)
+- [Overview](#overview)
+- [Hardware Requirements](#hardware-requirements)
+- [Wiring Diagram](#wiring-diagram)
 - [Dependencies](#dependencies)
-- [Project 1 — Interactive Display](#project-1--interactive-display)
-- [Project 2 — Text Animation Engine](#project-2--text-animation-engine)
+- [How It Works](#how-it-works)
+- [Configuration](#configuration)
+- [Project Structure](#project-structure)
+- [Security Notice](#security-notice)
+- [Usage](#usage)
 - [License](#license)
 
 ---
 
-## Projects
+## Overview
 
-| # | Folder | Description |
-|---|---|---|
-| 1 | `/interactive-display` | Button-controlled text sizing and display inversion |
-| 2 | `/text-animation` | 6-mode text animation engine with a single button |
+This project connects an STM32 microcontroller to an ESP module over UART (`Serial3`) and drives an SH1106 OLED display. On boot, the STM32 waits for the ESP to request credentials and path configuration via a structured request protocol (`REQ:SSID`, `REQ:PASS`, `REQ:PATH`, `REQ:TYPE`). Once all four handshake steps complete, the system marks itself as ready and the OLED switches into terminal mode — displaying any incoming serial data from the ESP in real time.
+
+Two push buttons allow the user to adjust text size and toggle display inversion at any time.
 
 ---
 
-## Shared Hardware
+## Hardware Requirements
 
 | Component | Details |
 |---|---|
-| Microcontroller | STM32 (or Arduino-compatible board) |
-| Display | SH1106 128×64 OLED (I2C) |
-| Buttons | Tactile push buttons on PA14 / PA13 |
-| Pull-down resistors | Required on button pins when using `INPUT` mode |
+| Microcontroller | STM32 (with Serial3 available) |
+| Wi-Fi Module | ESP8266 / ESP32 (communicating over UART) |
+| Display | SH1106 128×64 OLED (I2C, 0x3C) |
+| Left Switch (LSW) | Tactile button on **PA14** — cycles text size |
+| Right Switch (RSW) | Tactile button on **PA13** — toggles inversion |
+| Pull-down resistors | Required on PA14 and PA13 |
 
 ---
 
-## Shared Wiring
+## Wiring Diagram
 
 ```
-MCU           SH1106 OLED
+STM32         SH1106 OLED
 ─────────────────────────
 3.3V    →     VCC
 GND     →     GND
 SDA     →     SDA
 SCL     →     SCL
+
+STM32         ESP Module
+─────────────────────────
+Serial3 TX →  ESP RX
+Serial3 RX →  ESP TX
+GND        →  GND
+
+STM32         Buttons
+─────────────────────────
+PA14    →     Left Switch  (LSW) → GND
+PA13    →     Right Switch (RSW) → GND
 ```
 
-> ⚠️ Buttons are read as active-HIGH. Use external pull-down resistors to GND, or switch to `INPUT_PULLUP` and invert the trigger logic.
+> ⚠️ Buttons are wired as active-HIGH. Use external pull-down resistors, or switch to `INPUT_PULLUP` and invert the trigger logic.
 
 ---
 
@@ -67,121 +82,106 @@ pio lib install "Adafruit GFX Library"
 
 ---
 
-## Project 1 — Interactive Display
+## How It Works
 
-📁 `/interactive-display`
+### Two-Phase Operation
 
-### Overview
-Two push buttons control the OLED in real time — one cycles through three text sizes, the other toggles display inversion (swaps black and white pixels).
-
-### Extra Wiring
+The system operates in two distinct phases separated by a `systemReady` flag:
 
 ```
-MCU           Buttons
-─────────────────────────
-PA14    →     Left Switch  (LSW) — cycles text size
-PA13    →     Right Switch (RSW) — toggles inversion
+Phase 1 — Init Handshake
+  ESP sends REQ:SSID → STM32 replies SSID:<value>
+  ESP sends REQ:PASS → STM32 replies PASS:<value>
+  ESP sends REQ:PATH → STM32 replies PATH:<value>
+  ESP sends REQ:TYPE → STM32 replies TYPE:<value>
+                     → systemReady = true
+
+Phase 2 — Terminal Mode
+  Any incoming Serial3 data → displayed on OLED as terminal output
 ```
 
-### Features
+### Request Parser (Enum-Based)
 
-- Text size cycling: 1 → 2 → 3 → 1
-- Display inversion toggle (normal ↔ inverted)
-- Edge-detection button handling (fires once per press)
-- 200 ms software debounce
-
-### How It Works
-
-**Button Edge Detection** — Actions only trigger on the rising edge (LOW → HIGH transition), so holding a button down doesn't repeatedly fire.
+Incoming requests are parsed into a typed enum rather than raw string comparisons scattered across the code. This makes the handler clean and easy to extend.
 
 ```cpp
-if (currentLSW == 1 && lastStateLSW == 0) {
-    // Fires once when the button is first pressed
-}
+enum RequestType { REQ_SSID, REQ_PASS, REQ_PATH, REQ_TYPE, REQ_UNKNOWN };
 ```
 
-**Text Size Cycling** — `textSize` increments on each press and wraps back to 1 after 3.
+Each case in `espInit()` responds with the appropriate prefixed value and updates the OLED to confirm what was sent.
 
-| Text Size | Y Position |
-|---|---|
-| 1 | 0 px |
-| 2 | 10 px |
-| 3 | 20 px |
+### Firebase Path Construction
 
-**Display Inversion** — `display.invertDisplay()` flips all pixel values on the OLED. A boolean flag tracks the current state.
+The Firebase path is assembled at runtime in `setup()` from the user ID and page name:
 
-### Configuration
+```cpp
+Path = "commands/" + userID + "/" + page;
+// Result: "commands/P44J1/terminal"
+```
 
-| Setting | Default | Description |
+This keeps the path dynamic — change `userID` or `page` and the path updates automatically.
+
+### Button Controls
+
+Both buttons use edge detection (LOW → HIGH transition) to fire exactly once per press:
+
+| Button | Pin | Action |
 |---|---|---|
-| `lsw` | `PA14` | Text size button pin |
-| `rsw` | `PA13` | Inversion button pin |
-| `textSize` | `1` | Starting text size (1–3) |
-| I2C Address | `0x3C` | Change to `0x3D` if needed |
-| Debounce delay | `200 ms` | Adjust for your button quality |
+| LSW | PA14 | Cycle text size: 1 → 2 → 3 → 1 |
+| RSW | PA13 | Toggle display inversion |
 
 ---
 
-## Project 2 — Text Animation Engine
+## Configuration
 
-📁 `/text-animation`
-
-### Overview
-A single push button cycles through 6 real-time animation modes for a text object on screen. Built with non-blocking `millis()` timing so the display never freezes between frames.
-
-### Extra Wiring
-
-```
-MCU           Button
-─────────────────────────
-PA14    →     Left Switch (LSW) — cycles animation mode
-```
-
-### Animation Modes
-
-| Mode | Name | Description |
+| Variable | Default | Description |
 |---|---|---|
-| 1 | Left → Right | Horizontal scroll, wraps at edge |
-| 2 | Right → Left | Horizontal scroll reversed, wraps at edge |
-| 3 | Top → Bottom | Vertical scroll downward, wraps at edge |
-| 4 | Bottom → Top | Vertical scroll upward, wraps at edge |
-| 5 | Diagonal | Linear diagonal flight, resets at edge |
-| 6 | Bounce | Bounces off all four walls |
+| `wifiName` | `"YOUR_SSID"` | Wi-Fi network name sent to ESP |
+| `wifiP` | `"YOUR_PASSWORD"` | Wi-Fi password sent to ESP |
+| `userID` | `"P44J1"` | User identifier for Firebase path |
+| `page` | `"terminal"` | Page/node name for Firebase path |
+| `datatype` | `"STRING"` | Data type sent to ESP on REQ:TYPE |
+| `LSW` | `PA14` | Text size button pin |
+| `RSW` | `PA13` | Inversion button pin |
+| I2C Address | `0x3C` | OLED address (try `0x3D` if blank) |
+| Baud rate | `9600` | Used for both Serial and Serial3 |
 
-### Features
+---
 
-- 6 animation modes, 1 button
-- Non-blocking animation via `millis()` — no `delay()` used
-- Edge-detection button handling
-- Persistent mode indicator (bottom-right HUD)
-- Clean 3-step render pipeline: `handleInput → animate → render`
+## Project Structure
 
-### How It Works
+```
+.
+├── oled_terminal.ino   # Full sketch
+└── README.md           # This file
+```
 
-**Non-Blocking Timing** — Animation ticks are gated by a `millis()` check so the loop stays responsive at all times.
+---
+
+## Security Notice
+
+> 🔐 **Never commit Wi-Fi credentials to a public repository.**
+
+This sketch requires you to fill in your Wi-Fi SSID and password. Before pushing to GitHub, replace the credential values with placeholders:
 
 ```cpp
-if (millis() - lastUpdate < interval) return;
-lastUpdate = millis();
+String wifiName = "YOUR_SSID";
+String wifiP    = "YOUR_PASSWORD";
 ```
 
-**Bounce Collision** — Direction vectors are flipped when the text hits any screen wall.
+Consider adding a `config.h` file (added to `.gitignore`) to store credentials separately from the main sketch.
 
-```cpp
-if (x <= 0 || x >= SCREEN_WIDTH - textWidth())     dx = -dx;
-if (y <= 0 || y >= SCREEN_HEIGHT - (8 * textSize)) dy = -dy;
-```
+---
 
-### Configuration
+## Usage
 
-| Setting | Default | Description |
-|---|---|---|
-| `LSW` | `PA14` | Mode-cycle button pin |
-| `message` | `"*"` | Text to animate (any string) |
-| `textSize` | `1` | Text render scale (1–3) |
-| `interval` | `40 ms` | Animation tick rate (~25 fps) |
-| `dx` / `dy` | `2` / `1` | Movement speed per tick (pixels) |
-| I2C Address | `0x3C` | Change to `0x3D` if needed |
+1. Fill in your Wi-Fi credentials and Firebase path details in the configuration variables.
+2. Wire up hardware per the [Wiring Diagram](#wiring-diagram).
+3. Flash the sketch to your STM32.
+4. On boot, the OLED shows `"System Booting..."`.
+5. Power on the ESP module — it will begin the `REQ:SSID → REQ:PASS → REQ:PATH → REQ:TYPE` handshake automatically.
+6. Once all four steps complete, the OLED switches to terminal mode and displays any data the ESP sends.
+7. Use **LSW** to cycle text size and **RSW** to toggle display inversion at any time.
 
 ---
 
