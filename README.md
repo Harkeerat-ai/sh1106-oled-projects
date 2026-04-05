@@ -1,97 +1,98 @@
-# 🖥️ SH1106 OLED Interactive Display
+# 🖥️ SH1106 OLED Projects
 
-A lightweight Arduino/STM32 project that drives an **SH1106-based 128×64 OLED display** with two push-button controls — one to cycle through text sizes and another to toggle display inversion.
+A collection of STM32 projects driving an **SH1106 128×64 OLED** over I2C. Each project is self-contained and shares the same base hardware setup.
 
 ---
 
 ## 📋 Table of Contents
 
-- [Overview](#overview)
-- [Hardware Requirements](#hardware-requirements)
-- [Wiring Diagram](#wiring-diagram)
+- [Projects](#projects)
+- [Shared Hardware](#shared-hardware)
+- [Shared Wiring](#shared-wiring)
 - [Dependencies](#dependencies)
-- [Features](#features)
-- [How It Works](#how-it-works)
-- [Configuration](#configuration)
-- [Usage](#usage)
+- [Project 1 — Interactive Display](#project-1--interactive-display)
+- [Project 2 — Text Animation Engine](#project-2--text-animation-engine)
 - [License](#license)
 
 ---
 
-## Overview
+## Projects
 
-This project demonstrates basic I2C OLED control on an STM32 (or compatible) microcontroller. Two tactile switches are used to interact with the display in real time:
-
-- **Left Switch (PA14)** — Cycles the displayed text through three size levels (1 → 2 → 3 → back to 1)
-- **Right Switch (PA13)** — Toggles the display between normal and inverted color modes
-
-The display always shows `"Hello World"` as the demo text, repositioned vertically based on the selected text size.
+| # | Folder | Description |
+|---|---|---|
+| 1 | `/interactive-display` | Button-controlled text sizing and display inversion |
+| 2 | `/text-animation` | 6-mode text animation engine with a single button |
 
 ---
 
-## Hardware Requirements
+## Shared Hardware
 
 | Component | Details |
 |---|---|
 | Microcontroller | STM32 (or Arduino-compatible board) |
 | Display | SH1106 128×64 OLED (I2C) |
-| Switch 1 (LSW) | Tactile push button on pin **PA14** |
-| Switch 2 (RSW) | Tactile push button on pin **PA13** |
-| Pull-down resistors | Required if not using `INPUT_PULLUP` (see [Configuration](#configuration)) |
+| Buttons | Tactile push buttons on PA14 / PA13 |
+| Pull-down resistors | Required on button pins when using `INPUT` mode |
 
 ---
 
-## Wiring Diagram
+## Shared Wiring
 
 ```
 MCU           SH1106 OLED
 ─────────────────────────
 3.3V    →     VCC
 GND     →     GND
-SDA     →     SDA  (I2C Data)
-SCL     →     SCL  (I2C Clock)
-
-MCU           Buttons
-─────────────────────────
-PA14    →     Left Switch  (LSW) → GND
-PA13    →     Right Switch (RSW) → GND
+SDA     →     SDA
+SCL     →     SCL
 ```
 
-> ⚠️ The buttons are read as active-HIGH (`digitalRead == 1` triggers action). Make sure the pins are properly pulled down to GND when the button is not pressed, or change `INPUT` to `INPUT_PULLUP` and invert the logic.
+> ⚠️ Buttons are read as active-HIGH. Use external pull-down resistors to GND, or switch to `INPUT_PULLUP` and invert the trigger logic.
 
 ---
 
 ## Dependencies
 
-Install these libraries via the Arduino Library Manager or PlatformIO:
-
 | Library | Purpose |
 |---|---|
-| `Wire.h` | Built-in I2C communication library |
-| `Adafruit_SH1106` | OLED driver for SH1106-based displays |
+| `Wire.h` | Built-in I2C communication |
+| `Adafruit_GFX` | Core graphics primitives |
+| `Adafruit_SH1106` | SH1106 OLED display driver |
 
 ```bash
-# PlatformIO example
+# PlatformIO
 pio lib install "Adafruit SH1106"
+pio lib install "Adafruit GFX Library"
 ```
 
 ---
 
-## Features
+## Project 1 — Interactive Display
 
-- ✅ I2C OLED display initialization and rendering
-- ✅ Real-time text size cycling (3 levels)
-- ✅ Display inversion toggle
-- ✅ Software debouncing for both buttons (200 ms delay)
-- ✅ Edge-detection based button handling (fires once per press, not per held state)
+📁 `/interactive-display`
 
----
+### Overview
+Two push buttons control the OLED in real time — one cycles through three text sizes, the other toggles display inversion (swaps black and white pixels).
 
-## How It Works
+### Extra Wiring
 
-### Button Edge Detection
+```
+MCU           Buttons
+─────────────────────────
+PA14    →     Left Switch  (LSW) — cycles text size
+PA13    →     Right Switch (RSW) — toggles inversion
+```
 
-Rather than triggering on the raw button state, the code compares the **current state** to the **last recorded state**. An action fires only on the **rising edge** (button transitions from not-pressed → pressed), preventing repeated triggers from a single long press.
+### Features
+
+- Text size cycling: 1 → 2 → 3 → 1
+- Display inversion toggle (normal ↔ inverted)
+- Edge-detection button handling (fires once per press)
+- 200 ms software debounce
+
+### How It Works
+
+**Button Edge Detection** — Actions only trigger on the rising edge (LOW → HIGH transition), so holding a button down doesn't repeatedly fire.
 
 ```cpp
 if (currentLSW == 1 && lastStateLSW == 0) {
@@ -99,15 +100,7 @@ if (currentLSW == 1 && lastStateLSW == 0) {
 }
 ```
 
-### Text Size Cycling
-
-`textSize` is an integer that increments on each left-button press and wraps back to `1` after reaching `3`.
-
-```
-textSize: 1 → 2 → 3 → 1 → ...
-```
-
-The vertical cursor position (`yPos`) is adjusted per size to keep text visually centered:
+**Text Size Cycling** — `textSize` increments on each press and wraps back to 1 after 3.
 
 | Text Size | Y Position |
 |---|---|
@@ -115,33 +108,80 @@ The vertical cursor position (`yPos`) is adjusted per size to keep text visually
 | 2 | 10 px |
 | 3 | 20 px |
 
-### Display Inversion
+**Display Inversion** — `display.invertDisplay()` flips all pixel values on the OLED. A boolean flag tracks the current state.
 
-The `display.invertDisplay()` call flips all pixel values on the OLED — white becomes black and vice versa. The `inverted` boolean flag tracks the current state and toggles it on each right-button press.
+### Configuration
 
----
-
-## Configuration
-
-| Constant / Variable | Default | Description |
+| Setting | Default | Description |
 |---|---|---|
-| `lsw` | `PA14` | Pin for the left (text size) button |
-| `rsw` | `PA13` | Pin for the right (invert) button |
+| `lsw` | `PA14` | Text size button pin |
+| `rsw` | `PA13` | Inversion button pin |
 | `textSize` | `1` | Starting text size (1–3) |
-| `inverted` | `false` | Starting display inversion state |
-| I2C Address | `0x3C` | OLED I2C address (change if your display uses `0x3D`) |
-| Debounce delay | `200 ms` | Adjust lower for faster response, higher for noisier buttons |
+| I2C Address | `0x3C` | Change to `0x3D` if needed |
+| Debounce delay | `200 ms` | Adjust for your button quality |
 
 ---
 
-## Usage
+## Project 2 — Text Animation Engine
 
-1. Wire up the hardware as described in the [Wiring Diagram](#wiring-diagram).
-2. Install the required [Dependencies](#dependencies).
-3. Flash the sketch to your board.
-4. On power-up, the display will initialize and show **"Hello World"** with display inversion enabled by default.
-5. Press the **Left Switch** to cycle through text sizes.
-6. Press the **Right Switch** to toggle the inverted display mode.
+📁 `/text-animation`
+
+### Overview
+A single push button cycles through 6 real-time animation modes for a text object on screen. Built with non-blocking `millis()` timing so the display never freezes between frames.
+
+### Extra Wiring
+
+```
+MCU           Button
+─────────────────────────
+PA14    →     Left Switch (LSW) — cycles animation mode
+```
+
+### Animation Modes
+
+| Mode | Name | Description |
+|---|---|---|
+| 1 | Left → Right | Horizontal scroll, wraps at edge |
+| 2 | Right → Left | Horizontal scroll reversed, wraps at edge |
+| 3 | Top → Bottom | Vertical scroll downward, wraps at edge |
+| 4 | Bottom → Top | Vertical scroll upward, wraps at edge |
+| 5 | Diagonal | Linear diagonal flight, resets at edge |
+| 6 | Bounce | Bounces off all four walls |
+
+### Features
+
+- 6 animation modes, 1 button
+- Non-blocking animation via `millis()` — no `delay()` used
+- Edge-detection button handling
+- Persistent mode indicator (bottom-right HUD)
+- Clean 3-step render pipeline: `handleInput → animate → render`
+
+### How It Works
+
+**Non-Blocking Timing** — Animation ticks are gated by a `millis()` check so the loop stays responsive at all times.
+
+```cpp
+if (millis() - lastUpdate < interval) return;
+lastUpdate = millis();
+```
+
+**Bounce Collision** — Direction vectors are flipped when the text hits any screen wall.
+
+```cpp
+if (x <= 0 || x >= SCREEN_WIDTH - textWidth())     dx = -dx;
+if (y <= 0 || y >= SCREEN_HEIGHT - (8 * textSize)) dy = -dy;
+```
+
+### Configuration
+
+| Setting | Default | Description |
+|---|---|---|
+| `LSW` | `PA14` | Mode-cycle button pin |
+| `message` | `"*"` | Text to animate (any string) |
+| `textSize` | `1` | Text render scale (1–3) |
+| `interval` | `40 ms` | Animation tick rate (~25 fps) |
+| `dx` / `dy` | `2` / `1` | Movement speed per tick (pixels) |
+| I2C Address | `0x3C` | Change to `0x3D` if needed |
 
 ---
 
